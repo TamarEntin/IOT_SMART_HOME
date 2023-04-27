@@ -8,12 +8,12 @@ import paho.mqtt.client as mqtt
 from mqtt_init import *
 
 # Creating Client name - should be unique
-global clientname, CONNECTED
+global CONNECTED
 CONNECTED = False
 r = random.randrange(1, 10000000)
 clientname = "IOT_client-Id234-" + str(r)
-DHT_topic = 'pr/home/AquaAlert/DHT/'+str(r)
-update_rate = 5000  # in msec
+DHT_topic = 'pr/home/AquaAlert/DHT/1234'
+update_rate = 3000  # in msec
 
 
 class Mqtt_client():
@@ -30,6 +30,8 @@ class Mqtt_client():
         self.publishTopic = ''
         self.publishMessage = ''
         self.on_connected_to_form = ''
+        self.on_message_callback = None
+
 
     # Setters and getters
     def set_on_connected_to_form(self, on_connected_to_form):
@@ -86,6 +88,10 @@ class Mqtt_client():
     def on_log(self, client, userdata, level, buf):
         print("log: " + buf)
 
+    def set_on_message_callback(self, callback):
+        self.on_message_callback = callback
+
+
     def on_connect(self, client, userdata, flags, rc):
         global CONNECTED
         if rc == 0:
@@ -104,6 +110,8 @@ class Mqtt_client():
         m_decode = str(msg.payload.decode("utf-8", "ignore"))
         print("message from:" + topic, m_decode)
         mainwin.subscribeDock.update_mess_win(m_decode)
+        if self.on_message_callback and topic == DHT_topic:
+            self.on_message_callback(m_decode)
 
     def connect_to(self):
         # Init paho mqtt client class
@@ -199,19 +207,32 @@ class ConnectionDock(QDockWidget):
         widget.setLayout(formLayot)
         self.setTitleBarWidget(widget)
         self.setWidget(widget)
-        self.setWindowTitle("Connect")
+        self.setWindowTitle("Temperature and Humidity sensors")
+
+        self.connected = False
+
 
     def on_connected(self):
         self.eConnectbtn.setStyleSheet("background-color: green")
 
     def on_button_connect_click(self):
-        self.mc.set_broker(self.eHostInput.text())
-        self.mc.set_port(int(self.ePort.text()))
-        self.mc.set_clientName(self.eClientID.text())
-        self.mc.set_username(self.eUserName.text())
-        self.mc.set_password(self.ePassword.text())
-        self.mc.connect_to()
-        self.mc.start_listening()
+        if not self.connected:
+            self.mc.set_broker(self.eHostInput.text())
+            self.mc.set_port(int(self.ePort.text()))
+            self.mc.set_clientName(self.eClientID.text())
+            self.mc.set_username(self.eUserName.text())
+            self.mc.set_password(self.ePassword.text())
+            self.mc.connect_to()
+            self.mc.start_listening()
+            self.eConnectbtn.setStyleSheet("background-color: green")
+            self.eConnectbtn.setText("Disable/Disconnect")
+            self.connected = True
+        else:
+            self.mc.stop_listening()
+            self.mc.disconnect_from()
+            self.eConnectbtn.setStyleSheet("background-color: red")
+            self.eConnectbtn.setText("Enable/Connect")
+            self.connected = False
 
     def push_button_click(self):
         self.mc.publish_to(self.ePublisherTopic.text(), '"value":1')
@@ -239,7 +260,7 @@ class MainWindow(QMainWindow):
         self.setUnifiedTitleAndToolBarOnMac(True)
 
         # set up main window
-        self.setGeometry(30, 600, 300, 150)
+        self.setGeometry(30, 600, 380, 150)
         self.setWindowTitle('DHT')
 
         # Init QDockWidget objects
@@ -248,16 +269,50 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.TopDockWidgetArea, self.connectionDock)
 
     def update_data(self):
-        print('Next update')
-        temp = read_dht_temperature()
-        hum = read_dht_humidity()
-        current_data = 'Temperature: ' + str(temp) + ' Humidity: ' + str(hum)
-        self.connectionDock.Temperature.setText(str(temp))
-        self.connectionDock.Humidity.setText(str(hum))
-        self.mc.publish_to(DHT_topic, current_data)
+        if self.connectionDock.connected:
+            print('Next update')
+            temp = read_dht_temperature()
+            hum = read_dht_humidity()
+            current_data = 'Temperature: ' + str(temp) + ' Humidity: ' + str(hum)
+            self.connectionDock.Temperature.setText(str(temp))
+            self.connectionDock.Humidity.setText(str(hum))
+            self.mc.publish_to(DHT_topic, current_data)
+        else:
+            self.connectionDock.Temperature.setText('')
+            self.connectionDock.Humidity.setText('')
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    stylesheet = """
+        QMainWindow {
+            background-color: #FFEAE1;
+        }
+        QLineEdit {
+            border: 1px solid #C0C0C0;
+            padding: 5px;
+        }
+        QPushButton {
+            background-color: #6E9FEC;
+            color: white;
+            padding: 6px 12px;
+            text-align: center;
+            font-size: 14px;
+            margin: 4px 2px;
+            border-radius: 5px;
+        }
+        QPushButton:hover {
+            background-color: #5683D3;
+        }
+        QLabel {
+            font-size: 14px;
+            font-family: "Segoe UI";
+        }
+
+    """
+    app.setStyleSheet(stylesheet)
+
     mainwin = MainWindow()
     mainwin.show()
     app.exec_()
