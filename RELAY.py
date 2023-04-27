@@ -7,7 +7,6 @@ import paho.mqtt.client as mqtt
 from mqtt_init import *
 
 # Creating Client name - should be unique
-
 r = random.randrange(1, 10000000)
 clientname = "IOT_client-Id-"+str(r)
 relay_topic = 'pr/home/AquaAlert/relay/'+str(r)
@@ -95,11 +94,38 @@ class Mqtt_client():
     def on_disconnect(self, client, userdata, flags, rc=0):
         print("DisConnected result code "+str(rc))
 
+    def is_valid_temperature(self, temperature_value):
+        if temperature_value < temperature_threshold_min or temperature_value > temperature_threshold_max:
+            return False
+        return True
+
     def on_message(self, client, userdata, msg):
-        topic=msg.topic
-        m_decode=str(msg.payload.decode("utf-8", "ignore"))
-        print("message from:"+topic, m_decode)
-        mainwin.connectionDock.update_btn_state(m_decode)
+        topic = msg.topic
+        m_decode = str(msg.payload.decode("utf-8", "ignore"))
+        print("message from:" + topic, m_decode)
+
+        if m_decode.startswith("ALERT"):
+            # Check if the temperature is out of range
+            temperature_range_str = "Temperature value"
+            if temperature_range_str in m_decode:
+                temp_value_str = m_decode.split(temperature_range_str)[1].split()[0].strip("()°C")
+                try:
+                    temperature_value = float(temp_value_str)
+                except ValueError:
+                    print(f"Error: Unable to convert '{temp_value_str}' to float")
+                    return
+
+                print(f"Temperature value: {temperature_value}")  # Debugging print statement
+
+                if not self.is_valid_temperature(temperature_value):
+                    print("Updating button state: temperature_alert=True")  # Debugging print statement
+                    mainwin.connectionDock.update_btn_state(temperature_alert=True)
+                else:
+                    print("Updating button state: temperature_alert=False")  # Debugging print statement
+                    mainwin.connectionDock.update_btn_state(temperature_alert=False)
+            else:
+                print("Updating button state: temperature_alert=False")  # Debugging print statement
+                mainwin.connectionDock.update_btn_state(temperature_alert=False)
 
     def connect_to(self):
         # Init paho mqtt client class
@@ -131,6 +157,8 @@ class ConnectionDock(QDockWidget):
     """Main """
     def __init__(self,mc):
         QDockWidget.__init__(self)
+
+        self.connected = False
 
         self.mc = mc
         self.mc.set_on_connected_to_form(self.on_connected)
@@ -176,14 +204,6 @@ class ConnectionDock(QDockWidget):
         self.ePushtbtn.setStyleSheet("background-color: gray")
 
         formLayot=QFormLayout()
-        #formLayot.addRow("Host", self.eHostInput )
-        # formLayot.addRow("Port",self.ePort )
-        # formLayot.addRow("Client ID", self.eClientID)
-        # formLayot.addRow("User Name",self.eUserName )
-        # formLayot.addRow("Password",self.ePassword )
-        # formLayot.addRow("Keep Alive",self.eKeepAlive )
-        # formLayot.addRow("SSL",self.eSSL )
-        # formLayot.addRow("Clean Session",self.eCleanSession )
         formLayot.addRow("Turn On/Off", self.eConnectbtn)
         formLayot.addRow("Sub topic", self.eSubscribeTopic)
         formLayot.addRow("Status", self.ePushtbtn)
@@ -192,29 +212,42 @@ class ConnectionDock(QDockWidget):
         widget.setLayout(formLayot)
         self.setTitleBarWidget(widget)
         self.setWidget(widget)
-        self.setWindowTitle("Connect")
+        self.setWindowTitle("Relay for temperature")
 
     def on_connected(self):
         self.eConnectbtn.setStyleSheet("background-color: green")
 
     def on_button_connect_click(self):
-        self.mc.set_broker(self.eHostInput.text())
-        self.mc.set_port(int(self.ePort.text()))
-        self.mc.set_clientName(self.eClientID.text())
-        self.mc.set_username(self.eUserName.text())
-        self.mc.set_password(self.ePassword.text())
-        self.mc.connect_to()
-        self.mc.start_listening()
-        self.mc.subscribe_to(self.eSubscribeTopic.text())
+        if not self.connected:
+            self.mc.set_broker(self.eHostInput.text())
+            self.mc.set_port(int(self.ePort.text()))
+            self.mc.set_clientName(self.eClientID.text())
+            self.mc.set_username(self.eUserName.text())
+            self.mc.set_password(self.ePassword.text())
+            self.mc.connect_to()
+            self.mc.start_listening()
+            self.mc.subscribe_to(self.eSubscribeTopic.text())
+            self.mc.subscribe_to(warning_topic)
 
-    def update_btn_state(self, text):
-        global ON
-        if ON:
-            self.ePushtbtn.setStyleSheet("background-color: gray")
-            ON = False
+            self.connected = True
+            self.eConnectbtn.setText("Disable/Disconnect")
+            self.eConnectbtn.setStyleSheet("background-color: green")
+
         else:
+            self.mc.stop_listening()
+            self.mc.disconnect_from()
+
+            self.connected = False
+            self.eConnectbtn.setText("Enable/Connect")
+            self.eConnectbtn.setStyleSheet("background-color: red")
+
+    def update_btn_state(self, temperature_alert=False):
+        if temperature_alert:
             self.ePushtbtn.setStyleSheet("background-color: red")
-            ON = True
+
+        else:
+            self.ePushtbtn.setStyleSheet("background-color: gray")
+
 
 class MainWindow(QMainWindow):
 
@@ -228,7 +261,7 @@ class MainWindow(QMainWindow):
         self.setUnifiedTitleAndToolBarOnMac(True)
 
         # set up main window
-        self.setGeometry(30, 300, 300, 150)
+        self.setGeometry(30, 300, 370, 150)
         self.setWindowTitle('RELAY')
 
         # Init QDockWidget objects
@@ -237,6 +270,35 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.TopDockWidgetArea, self.connectionDock)
 
 app = QApplication(sys.argv)
+
+stylesheet = """
+    QMainWindow {
+        background-color: #DFFDFF;
+    }
+    QLineEdit {
+        border: 1px solid #C0C0C0;
+        padding: 5px;
+    }
+    QPushButton {
+        background-color: #6E9FEC;
+        color: white;
+        padding: 6px 12px;
+        text-align: center;
+        font-size: 14px;
+        margin: 4px 2px;
+        border-radius: 5px;
+    }
+    QPushButton:hover {
+        background-color: #5683D3;
+    }
+    QLabel {
+        font-size: 14px;
+        font-family: "Segoe UI";
+    }
+
+"""
+app.setStyleSheet(stylesheet)
+
 mainwin = MainWindow()
 mainwin.show()
 app.exec_()
