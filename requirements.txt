@@ -2,4 +2,3 @@ matplotlib
 paho-mqtt
 PyQt5
 icecream
-matplotlib
