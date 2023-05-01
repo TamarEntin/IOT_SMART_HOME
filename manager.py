@@ -1,5 +1,4 @@
 # intended to manage the system that notifies for aquaAlert  filters.
-# insert data to Smart home DB
 import paho.mqtt.client as mqtt
 import time
 import random
@@ -107,4 +106,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-    
